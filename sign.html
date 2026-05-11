@@ -589,19 +589,55 @@ function closePreview(){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
+// ── 壓縮簽名圖片 ──
+function compressSignature(dataUrl, maxWidth=400, quality=0.5){
+  return new Promise(resolve=>{
+    if(!dataUrl){ resolve(null); return; }
+    const img=new Image();
+    img.onload=()=>{
+      const canvas=document.createElement('canvas');
+      const scale=Math.min(1, maxWidth/img.width);
+      canvas.width=img.width*scale;
+      canvas.height=img.height*scale;
+      const ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src=dataUrl;
+  });
+}
+
 async function submitAll(){
   document.getElementById('loadingOverlay').classList.add('show');
   try{
     const token=getParam('token');
-    const res=await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      redirect: 'follow',
-      body: JSON.stringify({action:'submit',token,employee:employeeData,signatures:allData,submittedAt:new Date().toISOString()}),
-      headers: {'Content-Type':'text/plain'}
-    });
+
+    // 壓縮所有簽名圖片
+    const compressedData=await Promise.all(allData.map(async(d)=>({
+      fields: d.fields,
+      sig: d.sig ? await compressSignature(d.sig) : null
+    })));
+
+    // 把資料編碼後用 GET 方式傳送
+    const payload={
+      action:'submit',
+      token,
+      employee: employeeData,
+      signatures: compressedData,
+      submittedAt: new Date().toISOString()
+    };
+
+    const encoded=encodeURIComponent(JSON.stringify(payload));
+    const url=`${APPS_SCRIPT_URL}?data=${encoded}`;
+
+    const res=await fetch(url, { redirect:'follow', mode:'cors' });
     const result=await res.json();
-    if(result.success){ showSuccess(); } else { throw new Error(); }
-  }catch(e){ showSuccess(); } // demo mode
+    if(result.success){ showSuccess(); } else { throw new Error(result.message||'送出失敗'); }
+  }catch(e){
+    console.log('送出錯誤：'+e.message);
+    document.getElementById('loadingOverlay').classList.remove('show');
+    alert('送出失敗，請再試一次。\n錯誤：'+e.message);
+  }
 }
 
 function showSuccess(){
