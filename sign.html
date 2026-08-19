@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>員工文件簽署系統</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/4.1.7/signature_pad.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -56,7 +56,19 @@ body { font-family: 'Noto Serif TC','Georgia','PMingLiU',serif; background:var(-
 .doc-loading-spinner { width:28px; height:28px; border:3px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin 0.8s linear infinite; margin-bottom:10px; }
 .doc-loading p { font-size:13px; }
 
-.scroll-hint { text-align:center; font-size:11px; color:var(--text-muted); padding:6px; background:#fafaf8; border-bottom:1px solid var(--border); }
+.scroll-hint { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px; color:var(--text-muted); padding:6px 10px; background:#fafaf8; border-bottom:1px solid var(--border); }
+.scroll-hint-text { flex:1; text-align:center; }
+.btn-fs { flex-shrink:0; font-size:12px; font-family:inherit; color:var(--primary); background:white; border:1px solid var(--primary); padding:5px 11px; border-radius:7px; cursor:pointer; font-weight:600; }
+
+/* 全螢幕閱讀 */
+.fs-overlay { display:none; position:fixed; inset:0; z-index:300; background:white; }
+.fs-overlay.show { display:flex; flex-direction:column; }
+.fs-bar { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--primary); color:white; padding:10px 14px; }
+.fs-title { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fs-close { flex-shrink:0; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.45); color:white; font-family:inherit; font-size:13px; padding:7px 14px; border-radius:8px; cursor:pointer; }
+.fs-body { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; touch-action:pan-x pan-y pinch-zoom; }
+.fs-body .pdf-pages canvas { width:100%; display:block; border-bottom:1px solid var(--border); touch-action:pan-x pan-y pinch-zoom; }
+.fs-tip { flex-shrink:0; text-align:center; font-size:11px; color:var(--text-muted); background:#fafaf8; border-top:1px solid var(--border); padding:6px 10px; }
 
 .form-section { padding:16px 20px; border-bottom:1px solid var(--border); }
 .form-section h3 { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:12px; }
@@ -81,7 +93,7 @@ body { font-family: 'Noto Serif TC','Georgia','PMingLiU',serif; background:var(-
 .sig-placeholder-icon { font-size:26px; opacity:0.25; margin-bottom:4px; }
 .sig-placeholder-text { font-size:12px; color:var(--text-muted); }
 #sigCanvas { display:block; width:100%; height:150px; cursor:crosshair; touch-action:none; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
-.pdf-pages canvas { display:block; width:100%; height:auto; touch-action:pan-y; }
+.pdf-pages canvas { display:block; width:100%; height:auto; touch-action:pan-y pinch-zoom; }
 .sig-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
 .btn-undo { font-size:12px; color:var(--text-muted); background:none; border:1px solid var(--border); padding:5px 12px; border-radius:6px; cursor:pointer; font-family:inherit; }
 .btn-clear { font-size:12px; color:var(--text-muted); background:none; border:1px solid var(--border); padding:5px 12px; border-radius:6px; cursor:pointer; font-family:inherit; }
@@ -171,6 +183,15 @@ body { font-family: 'Noto Serif TC','Georgia','PMingLiU',serif; background:var(-
   </div>
 </div>
 
+<div class="fs-overlay" id="fsOverlay">
+  <div class="fs-bar">
+    <span class="fs-title" id="fsTitle"></span>
+    <button class="fs-close" onclick="closeFullscreen()">✕ 關閉</button>
+  </div>
+  <div class="fs-body" id="fsBody"></div>
+  <div class="fs-tip">雙指撥開可放大，放大後可左右拖曳</div>
+</div>
+
 <div id="mainApp">
   <div class="header">
     <div class="header-top">
@@ -183,7 +204,10 @@ body { font-family: 'Noto Serif TC','Georgia','PMingLiU',serif; background:var(-
   <div class="container">
     <div class="step-dots" id="stepDots"></div>
     <div class="doc-card">
-      <div class="scroll-hint" id="scrollHint">↕ 請上下滑動閱讀完整內容</div>
+      <div class="scroll-hint" id="scrollHint">
+        <span class="scroll-hint-text" id="scrollHintText">↕ 請上下滑動閱讀完整內容</span>
+        <button class="btn-fs" id="btnFullscreen" onclick="openFullscreen()">⛶ 放大閱讀</button>
+      </div>
       <div class="doc-content text-mode" id="docContent"></div>
       <div class="form-section" id="formSection" style="display:none">
         <h3>請填寫以下資料</h3>
@@ -289,11 +313,12 @@ function base64ToBlob(base64, mimeType){
 }
 
 async function renderPdfInView(index){
+  closeFullscreen();
   const docContent=document.getElementById('docContent');
   docContent.classList.remove('text-mode');
   docContent.classList.add('pdf-mode');
   docContent.innerHTML=LOADING_HTML;
-  document.getElementById('scrollHint').textContent='↕ 請在文件內上下滑動閱讀完整內容';
+  document.getElementById('scrollHintText').textContent='↕ 上下滑動閱讀，字太小請按右邊';
   try{
     const pdf=await pdfjsLib.getDocument(docs[index].pdfBlobUrl).promise;
     const container=document.createElement('div');
@@ -319,6 +344,40 @@ async function renderPdfInView(index){
   }
 }
 
+// ── 全螢幕閱讀（不重新渲染，直接把已畫好的頁面搬過去，不增加記憶體）──
+function openFullscreen(){
+  const pages=document.querySelector('#docContent .pdf-pages');
+  if(!pages){ alert('文件尚未載入完成，請稍候再試。'); return; }
+  document.getElementById('fsTitle').textContent=docs[currentDoc].title;
+  document.getElementById('fsBody').appendChild(pages);
+  document.getElementById('fsOverlay').classList.add('show');
+  document.getElementById('fsBody').scrollTop=0;
+  document.body.style.overflow='hidden';
+  // 手機返回鍵可關閉全螢幕
+  try{ history.pushState({fs:true},''); }catch(e){}
+}
+
+function closeFullscreen(fromPop){
+  const overlay=document.getElementById('fsOverlay');
+  if(!overlay.classList.contains('show')) return;
+  const pages=document.querySelector('#fsBody .pdf-pages');
+  if(pages) document.getElementById('docContent').appendChild(pages);
+  overlay.classList.remove('show');
+  document.body.style.overflow='';
+  resetZoom();
+  if(!fromPop){ try{ if(history.state&&history.state.fs) history.back(); }catch(e){} }
+}
+
+// 離開全螢幕時把頁面縮放復原
+function resetZoom(){
+  const vp=document.querySelector('meta[name=viewport]');
+  if(!vp) return;
+  vp.setAttribute('content','width=device-width, initial-scale=1.0, maximum-scale=1.0');
+  setTimeout(()=>vp.setAttribute('content','width=device-width, initial-scale=1.0'),300);
+}
+
+window.addEventListener('popstate',()=>closeFullscreen(true));
+
 // ── UI ──
 function setupUI(){
   document.getElementById('headerCompany').textContent=employeeData.company;
@@ -331,6 +390,7 @@ function buildStepDots(){
 }
 
 function renderDoc(index){
+  closeFullscreen();
   currentDoc=index;
   const doc=docs[index], isLast=index===docs.length-1;
   document.getElementById('docCounter').textContent=`${index+1} / ${docs.length}`;
@@ -350,7 +410,7 @@ function renderDoc(index){
     docContent.classList.remove('pdf-mode');
     docContent.classList.add('text-mode');
     docContent.innerHTML=LOADING_HTML;
-    document.getElementById('scrollHint').textContent='↕ 請上下滑動閱讀完整內容';
+    document.getElementById('scrollHintText').textContent='↕ 請上下滑動閱讀完整內容';
   }
 
   const fs=document.getElementById('formSection'), ff=document.getElementById('formFields');
